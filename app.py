@@ -20,6 +20,7 @@ from sklearn.tree import DecisionTreeClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score, f1_score
+from ai_agent import ask_agro_agent, get_api_key
 
 # ------------------------------------------------------------------
 # Configuración de página
@@ -110,9 +111,10 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
     ["📊 Panorama General", "🌾 Perfil por Cultivo", "🔗 Correlaciones",
-     "🧭 Diagnóstico de Suelo (Ecuador)", "🌦️ Clima y Temporada (API)"]
+     "🧭 Diagnóstico de Suelo (Ecuador)", "🌦️ Clima y Temporada (API)",
+     "🤖 Asesor IA"]
 )
 
 # ------------------------------------------------------------------
@@ -534,6 +536,90 @@ with tab5:
         )
     else:
         st.info("Ingresa una ciudad y pulsa el botón para traer el clima real desde la API.")
+
+# ------------------------------------------------------------------
+# TAB 6 — Asesor IA con contexto del modelo
+# ------------------------------------------------------------------
+with tab6:
+    st.subheader("Asesor IA para alternativas de cultivo")
+    st.write(
+        "Consulta dudas sobre el suelo o pide opciones de cultivo. El asesor recibe el "
+        "diagnóstico calculado por Random Forest y lo explica en lenguaje sencillo."
+    )
+
+    # Selección independiente para que el asesor pueda explorar escenarios.
+    agent_region = st.selectbox("Región de referencia", list(ec.REGIONES.keys()), key="agent_region")
+    agent_soil_key = st.selectbox(
+        "Tipo de suelo", list(ec.SUELOS.keys()),
+        format_func=lambda key: ec.SUELOS[key]["nombre"], key="agent_soil",
+    )
+    agent_crop = st.selectbox(
+        "Cultivo que deseas evaluar", sorted(df["label"].unique()),
+        format_func=lambda c: ec.CROP_ES.get(c, (c, False))[0], key="agent_crop",
+    )
+
+    agent_soil = ec.SUELOS[agent_soil_key]
+    agent_climate = ec.REGIONES[agent_region]
+    agent_vector = {
+        **agent_soil["perfil"],
+        "temperature": agent_climate["temperature"],
+        "humidity": agent_climate["humidity"],
+        "rainfall": agent_climate["rainfall"],
+    }
+    agent_X = pd.DataFrame([agent_vector])[VAR_COLS]
+    agent_probs = rf_model.predict_proba(agent_X)[0]
+    agent_top = np.argsort(agent_probs)[::-1][:5]
+    agent_alternatives = [
+        {
+            "cultivo": ec.CROP_ES.get(classes[i], (classes[i], False))[0],
+            "probabilidad_modelo": round(float(agent_probs[i]) * 100, 1),
+        }
+        for i in agent_top
+    ]
+    agent_desired_probability = float(agent_probs[list(classes).index(agent_crop)]) * 100
+
+    st.caption(
+        "Base del asesor: " + ", ".join(
+            f"{item['cultivo']} ({item['probabilidad_modelo']}%)" for item in agent_alternatives
+        )
+    )
+    question = st.text_area(
+        "Pregunta al asesor",
+        value="¿Qué cultivo alternativo me recomiendas y qué debo vigilar en este suelo?",
+        height=100,
+    )
+
+    api_key = get_api_key(st.secrets)
+    if not api_key:
+        st.warning(
+            "Para activar el asesor, configura `OPENAI_API_KEY` como variable de entorno "
+            "o en `.streamlit/secrets.toml`. El diagnóstico y el Top 5 siguen funcionando "
+            "sin IA."
+        )
+
+    if st.button("🤖 Pedir recomendación al asesor", type="primary", disabled=not api_key):
+        agent_context = {
+            "region": agent_region,
+            "tipo_de_suelo": agent_soil["nombre"],
+            "descripcion_suelo": agent_soil["descripcion"],
+            "perfil_estimado": agent_vector,
+            "cultivo_consultado": ec.CROP_ES.get(agent_crop, (agent_crop, False))[0],
+            "compatibilidad_cultivo_consultado_pct": round(agent_desired_probability, 1),
+            "alternativas_top_5_random_forest": agent_alternatives,
+        }
+        with st.spinner("El asesor está analizando el diagnóstico…"):
+            try:
+                answer = ask_agro_agent(question, agent_context, api_key)
+                st.session_state["agent_answer"] = answer
+            except Exception as error:
+                st.error(f"No se pudo consultar el asesor: {error}")
+
+    if st.session_state.get("agent_answer"):
+        st.markdown(st.session_state["agent_answer"])
+        st.caption(
+            "El asesor interpreta la salida del modelo; no reemplaza un análisis de suelo "
+            "ni la evaluación de un profesional agrónomo."
+        )
 
 st.markdown("---")
 st.caption("Prototipo académico — AgroSmart EC · Proyecto Integrador de Analítica de Negocios · ULEAM")

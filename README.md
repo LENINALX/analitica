@@ -27,6 +27,31 @@ streamlit run app.py
   usa el **Random Forest real entrenado en vivo** (no una aproximación) para predecir el
   cultivo más probable, con su nivel de confianza y el Top 5 de alternativas.
 
+- **Asesor IA**: interpreta el diagnóstico del suelo y el Top 5 de alternativas calculado por
+  Random Forest para responder preguntas en español. No sustituye el modelo: recibe sus
+  resultados como contexto para que las recomendaciones sean trazables.
+
+## Activar el asesor IA (opcional)
+
+1. Instala las dependencias de nuevo: `pip install -r requirements.txt`.
+2. Crea una clave de API de OpenAI y configúrala fuera del código fuente. En PowerShell para la
+   sesión actual:
+
+```powershell
+$env:OPENAI_API_KEY="tu_clave"
+streamlit run app.py
+```
+
+También puedes crear `.streamlit/secrets.toml` (no lo subas a Git):
+
+```toml
+OPENAI_API_KEY = "tu_clave"
+# Opcional: OPENAI_MODEL = "gpt-5"
+```
+
+Sin clave, las pestañas de analítica, diagnóstico, alternativas y clima continúan disponibles;
+solamente se desactiva el botón del asesor.
+
 Todo el modelo se entrena una sola vez al iniciar la app (con caché de Streamlit), usando el
 mismo dataset y la misma metodología (80/20 estratificado, random_state=42) documentados en el
 Informe Técnico.
